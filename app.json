@@ -1,7 +1,7 @@
 {
   "name": "Nexa NSFW Moderation Bot",
   "description": "AI-powered Telegram NSFW moderation bot with image detection, text AI filtering, bad word & link protection, warnings and auto mute.",
-  "repository": "https://github.com/YOUR_USERNAME/nexa-nsfw-bot",
+  "repository": "https://github.com/sexyxcoders/nexa-nfsw-bot",
   "keywords": [
     "telegram",
     "nsfw",
