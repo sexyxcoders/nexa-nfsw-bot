@@ -2,5 +2,8 @@ python-telegram-bot==20.7
 requests
 pymongo
 transformers
-torch
 better-profanity
+
+# CPU-only torch (NO CUDA)
+torch==2.2.2+cpu
+--extra-index-url https://download.pytorch.org/whl/cpu
