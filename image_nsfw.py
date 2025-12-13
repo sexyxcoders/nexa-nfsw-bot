@@ -1,6 +1,6 @@
 import requests
 
-NSFW_IMAGE_API = "https://NexaCoders-nexa-api.hf.space"
+NSFW_API = "https://NexaCoders-nexa-api.hf.space/scan"
 
 HEADERS = {
     "User-Agent": "Nexa-NSFW-Bot"
