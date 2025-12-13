@@ -6,24 +6,24 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     ContextTypes,
-    filters
+    filters,
 )
 from pymongo import MongoClient
 
-# ================== CONFIG ==================
+# ================= CONFIG =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URL = os.getenv("MONGO_URL")
 
 NSFW_API = "https://nexacoders-nexa-api.hf.space/scan"
 
-# ================== DATABASE ==================
+# ================= DATABASE =================
 client = MongoClient(MONGO_URL)
 db = client["nsfw_bot"]
 groups = db["groups"]
 
 print("✅ MongoDB connected")
 
-# ================== HELPERS ==================
+# ================= HELPERS =================
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
     try:
         member = await context.bot.get_chat_member(
@@ -35,36 +35,33 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: 
 
 
 def scan_text_api(text: str) -> bool:
-    """
-    Returns True if NSFW, False if safe
-    """
     try:
         r = requests.post(
             NSFW_API,
             json={"text": text},
-            timeout=10
+            timeout=10,
         )
         data = r.json()
+        print("🧠 API RESPONSE:", data)
 
-        # EXPECTED API RESPONSE:
-        # { "nsfw": true/false }
-        return data.get("nsfw", False)
+        return isinstance(data, dict) and data.get("nsfw", False)
 
     except Exception as e:
-        print("API ERROR:", e)
+        print("🚫 API ERROR:", e)
         return False
 
 
-# ================== COMMANDS ==================
+# ================= COMMANDS =================
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(
-        "🛡 **NSFW Detector Bot**\n\n"
-        "Admins:\n"
+        "🛡 NSFW Detector Bot\n\n"
+        "Admins only:\n"
         "/nsfw enable\n"
         "/nsfw disable\n"
         "/stats\n\n"
-        "Uses AI-based NSFW detection.",
-        parse_mode="Markdown"
+        "⚠️ Make sure:\n"
+        "• Bot privacy OFF\n"
+        "• Bot admin with delete permission"
     )
 
 
@@ -84,21 +81,16 @@ async def nsfw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     action = context.args[0].lower()
 
-    if action == "enable":
-        groups.update_one(
-            {"chat_id": update.effective_chat.id},
-            {"$set": {"enabled": True}},
-            upsert=True
-        )
-        await update.effective_message.reply_text("✅ NSFW filter enabled")
+    groups.update_one(
+        {"chat_id": update.effective_chat.id},
+        {"$set": {"enabled": action == "enable"}},
+        upsert=True,
+    )
 
-    elif action == "disable":
-        groups.update_one(
-            {"chat_id": update.effective_chat.id},
-            {"$set": {"enabled": False}},
-            upsert=True
-        )
-        await update.effective_message.reply_text("❌ NSFW filter disabled")
+    await update.effective_message.reply_text(
+        "✅ NSFW filter enabled" if action == "enable"
+        else "❌ NSFW filter disabled"
+    )
 
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -106,17 +98,16 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     disabled = groups.count_documents({"enabled": False})
 
     await update.effective_message.reply_text(
-        f"📊 **Bot Stats**\n\n"
-        f"✅ Enabled groups: {enabled}\n"
-        f"❌ Disabled groups: {disabled}",
-        parse_mode="Markdown"
+        f"📊 Bot Stats\n\n"
+        f"Enabled groups: {enabled}\n"
+        f"Disabled groups: {disabled}"
     )
 
 
-# ================== MESSAGE HANDLER ==================
+# ================= MESSAGE HANDLER =================
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.effective_message
-    if not msg:
+    msg = update.message
+    if not msg or not msg.text:
         return
 
     if update.effective_chat.type == "private":
@@ -126,27 +117,20 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not cfg or not cfg.get("enabled"):
         return
 
-    # Ignore admins
     if await is_admin(update, context, msg.from_user.id):
         return
 
-    text = msg.text or msg.caption
-    if not text:
-        return
+    print("🔎 SCANNING:", msg.text)
 
-    print("🔎 SCANNING:", text)
-
-    is_nsfw = scan_text_api(text)
-
-    if is_nsfw:
+    if scan_text_api(msg.text):
         try:
             await msg.delete()
             print("❌ NSFW MESSAGE DELETED")
         except Exception as e:
-            print("🚫 DELETE ERROR:", e)
+            print("🚫 DELETE FAILED:", e)
 
 
-# ================== MAIN ==================
+# ================= MAIN =================
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -154,9 +138,10 @@ def main():
     app.add_handler(CommandHandler("nsfw", nsfw_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
 
-    app.add_handler(MessageHandler(filters.ALL, text_handler))
+    # IMPORTANT FILTER
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-    print("🤖 NSFW Bot is running")
+    print("🤖 NSFW Bot running")
     app.run_polling()
 
 
