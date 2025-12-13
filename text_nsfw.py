@@ -1,7 +1,7 @@
 import requests
 
 # Your HF Space API (recommended instead of hate-speech model)
-NSFW_TEXT_API = "https://nexacoders-nexa-api.hf.space/scan"
+NSFW_TEXT_API = "https://NexaCoders-nexa-api.hf.space"
 
 BAD_WORDS = [
     "sex", "porn", "nude", "boobs", "fuck",
