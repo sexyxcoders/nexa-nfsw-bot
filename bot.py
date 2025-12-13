@@ -15,7 +15,7 @@ from text_nsfw import is_nsfw_text
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 
-# -------- ADMIN CHECK --------
+# ---------- ADMIN CHECK ----------
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     member = await context.bot.get_chat_member(
         update.effective_chat.id,
@@ -24,46 +24,51 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return member.status in ("administrator", "creator")
 
 
-# -------- /nsfw enable --------
-async def nsfw_enable(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_admin(update, context):
+# ---------- /nsfw ----------
+async def nsfw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type == "private":
         return
 
-    groups.update_one(
-        {"chat_id": update.effective_chat.id},
-        {"$set": {"enabled": True}},
-        upsert=True
-    )
-    await update.message.reply_text("✅ NSFW filter enabled")
-
-
-# -------- /nsfw disable --------
-async def nsfw_disable(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context):
+        await update.message.reply_text("❌ Admins only")
         return
 
-    groups.update_one(
-        {"chat_id": update.effective_chat.id},
-        {"$set": {"enabled": False}},
-        upsert=True
-    )
-    await update.message.reply_text("❌ NSFW filter disabled")
+    if not context.args:
+        await update.message.reply_text("Use:\n/nsfw enable\n/nsfw disable")
+        return
+
+    action = context.args[0].lower()
+
+    if action == "enable":
+        groups.update_one(
+            {"chat_id": update.effective_chat.id},
+            {"$set": {"enabled": True}},
+            upsert=True
+        )
+        await update.message.reply_text("✅ NSFW filter enabled")
+
+    elif action == "disable":
+        groups.update_one(
+            {"chat_id": update.effective_chat.id},
+            {"$set": {"enabled": False}},
+            upsert=True
+        )
+        await update.message.reply_text("❌ NSFW filter disabled")
 
 
-# -------- /stats --------
+# ---------- /stats ----------
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     enabled = groups.count_documents({"enabled": True})
     disabled = groups.count_documents({"enabled": False})
 
     await update.message.reply_text(
-        f"📊 **Bot Stats**\n\n"
+        f"📊 Bot Stats\n\n"
         f"✅ Enabled groups: {enabled}\n"
-        f"❌ Disabled groups: {disabled}",
-        parse_mode="Markdown"
+        f"❌ Disabled groups: {disabled}"
     )
 
 
-# -------- TEXT HANDLER --------
+# ---------- MESSAGE FILTER ----------
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
         return
@@ -83,18 +88,17 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.delete()
 
 
-# -------- MAIN --------
+# ---------- MAIN ----------
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
-    app.add_handler(CommandHandler("nsfw", nsfw_enable, filters.Regex("^/nsfw enable")))
-    app.add_handler(CommandHandler("nsfw", nsfw_disable, filters.Regex("^/nsfw disable")))
+    app.add_handler(CommandHandler("nsfw", nsfw_cmd))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-    print("🤖 Simple NSFW Bot running...")
+    print("🤖 NSFW Bot running")
     app.run_polling()
 
 
