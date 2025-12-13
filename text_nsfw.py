@@ -1,33 +1,44 @@
 import requests
 
-HF_TEXT_API = "https://api-inference.huggingface.co/models/facebook/roberta-hate-speech-dynabench-r4-target"
+# Your HF Space API (recommended instead of hate-speech model)
+NSFW_TEXT_API = "https://nexacoders-nexa-api.hf.space/scan"
 
 BAD_WORDS = [
     "sex", "porn", "nude", "boobs", "fuck",
     "hentai", "xxx", "bitch", "slut"
 ]
 
+HEADERS = {
+    "User-Agent": "Nexa-NSFW-Bot"
+}
+
 
 def is_nsfw_text(text: str) -> bool:
-    t = text.lower()
+    text = text.lower()
 
-    # Fast keyword check
-    for w in BAD_WORDS:
-        if w in t:
+    # -------- FAST KEYWORD CHECK --------
+    for word in BAD_WORDS:
+        if word in text:
             return True
 
-    # AI check
+    # -------- AI API CHECK --------
     try:
         r = requests.post(
-            HF_TEXT_API,
-            json={"inputs": text},
-            timeout=8
+            NSFW_TEXT_API,
+            json={"text": text},
+            headers=HEADERS,
+            timeout=10
         )
+
         data = r.json()
-        for item in data[0]:
-            if item["score"] > 0.7:
-                return True
-    except Exception:
-        pass
+        print("TEXT API RESPONSE:", data)
+
+        # Expected:
+        # { "nsfw": true/false }
+        if isinstance(data, dict):
+            return data.get("nsfw", False)
+
+    except Exception as e:
+        print("TEXT NSFW ERROR:", e)
 
     return False
