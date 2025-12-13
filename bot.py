@@ -14,7 +14,7 @@ from pymongo import MongoClient
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URL = os.getenv("MONGO_URL")
 
-NSFW_API = "https://nexacoders-nexa-api.hf.space/scan"
+NSFW_API = "https://NexaCoders-nexa-api.hf.space"
 
 BAD_WORDS = [
     "sex", "porn", "nude", "boobs", "fuck",
