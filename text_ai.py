@@ -1,51 +1,33 @@
-from transformers import pipeline
+import requests
 
-# ------------------------------
-# Load AI Text NSFW / Toxic Model
-# ------------------------------
-# This model detects:
-# - sexual content
-# - abusive / toxic language
-# - harassment
-# - explicit text
+HF_TEXT_API = "https://api-inference.huggingface.co/models/facebook/roberta-hate-speech-dynabench-r4-target"
 
-_classifier = pipeline(
-    "text-classification",
-    model="unitary/unbiased-toxic-roberta",
-    return_all_scores=True
-)
-
-# Labels we consider NSFW / unsafe
-NSFW_LABELS = {
-    "sexual_explicit",
-    "toxicity",
-    "insult",
-    "threat",
-    "identity_attack"
-}
-
-# Confidence threshold (fixed, no per-group logic)
-THRESHOLD = 0.70
+BAD_WORDS = [
+    "sex", "porn", "nude", "boobs", "fuck",
+    "hentai", "xxx", "bitch", "slut"
+]
 
 
 def is_nsfw_text(text: str) -> bool:
-    """
-    Returns True if AI detects NSFW / toxic / sexual text.
-    """
-    if not text or len(text.strip()) < 3:
-        return False
+    t = text.lower()
 
-    try:
-        # Model max safe length
-        result = _classifier(text[:512])[0]
-    except Exception:
-        return False
-
-    for r in result:
-        label = r["label"].lower()
-        score = r["score"]
-
-        if label in NSFW_LABELS and score >= THRESHOLD:
+    # Fast keyword check
+    for w in BAD_WORDS:
+        if w in t:
             return True
+
+    # AI check
+    try:
+        r = requests.post(
+            HF_TEXT_API,
+            json={"inputs": text},
+            timeout=8
+        )
+        data = r.json()
+        for item in data[0]:
+            if item["score"] > 0.7:
+                return True
+    except Exception:
+        pass
 
     return False
