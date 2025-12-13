@@ -6,7 +6,7 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     ContextTypes,
-    filters,
+    filters
 )
 from pymongo import MongoClient
 
@@ -15,6 +15,11 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URL = os.getenv("MONGO_URL")
 
 NSFW_API = "https://nexacoders-nexa-api.hf.space/scan"
+
+BAD_WORDS = [
+    "sex", "porn", "nude", "boobs", "fuck",
+    "hentai", "xxx", "slut", "bitch"
+]
 
 # ================= DATABASE =================
 client = MongoClient(MONGO_URL)
@@ -26,28 +31,48 @@ print("✅ MongoDB connected")
 # ================= HELPERS =================
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
     try:
-        member = await context.bot.get_chat_member(
-            update.effective_chat.id, user_id
-        )
-        return member.status in ("administrator", "creator")
+        m = await context.bot.get_chat_member(update.effective_chat.id, user_id)
+        return m.status in ("administrator", "creator")
     except:
         return False
 
 
 def scan_text_api(text: str) -> bool:
+    text_l = text.lower()
+
+    # Fast bad-word check
+    for w in BAD_WORDS:
+        if w in text_l:
+            return True
+
+    # AI scan
     try:
         r = requests.post(
             NSFW_API,
             json={"text": text},
-            timeout=10,
+            timeout=10
         )
         data = r.json()
-        print("🧠 API RESPONSE:", data)
-
-        return isinstance(data, dict) and data.get("nsfw", False)
-
+        print("🧠 TEXT API:", data)
+        return data.get("nsfw", False)
     except Exception as e:
-        print("🚫 API ERROR:", e)
+        print("TEXT API ERROR:", e)
+        return False
+
+
+def scan_image_api(path: str) -> bool:
+    try:
+        with open(path, "rb") as f:
+            r = requests.post(
+                NSFW_API,
+                files={"file": f},
+                timeout=15
+            )
+        data = r.json()
+        print("🖼 IMAGE API:", data)
+        return data.get("nsfw", False)
+    except Exception as e:
+        print("IMAGE API ERROR:", e)
         return False
 
 
@@ -55,13 +80,11 @@ def scan_text_api(text: str) -> bool:
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(
         "🛡 NSFW Detector Bot\n\n"
-        "Admins only:\n"
+        "Commands:\n"
         "/nsfw enable\n"
         "/nsfw disable\n"
         "/stats\n\n"
-        "⚠️ Make sure:\n"
-        "• Bot privacy OFF\n"
-        "• Bot admin with delete permission"
+        "⚠️ Bot deletes NSFW text & images (admins included)."
     )
 
 
@@ -74,40 +97,35 @@ async def nsfw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.effective_message.reply_text(
-            "Usage:\n/nsfw enable\n/nsfw disable"
-        )
+        await update.effective_message.reply_text("Use: /nsfw enable | disable")
         return
 
-    action = context.args[0].lower()
+    enable = context.args[0].lower() == "enable"
 
     groups.update_one(
         {"chat_id": update.effective_chat.id},
-        {"$set": {"enabled": action == "enable"}},
-        upsert=True,
+        {"$set": {"enabled": enable}},
+        upsert=True
     )
 
     await update.effective_message.reply_text(
-        "✅ NSFW filter enabled" if action == "enable"
-        else "❌ NSFW filter disabled"
+        "✅ NSFW filter enabled" if enable else "❌ NSFW filter disabled"
     )
 
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    enabled = groups.count_documents({"enabled": True})
-    disabled = groups.count_documents({"enabled": False})
+    e = groups.count_documents({"enabled": True})
+    d = groups.count_documents({"enabled": False})
 
     await update.effective_message.reply_text(
-        f"📊 Bot Stats\n\n"
-        f"Enabled groups: {enabled}\n"
-        f"Disabled groups: {disabled}"
+        f"📊 Stats\nEnabled groups: {e}\nDisabled groups: {d}"
     )
 
 
 # ================= MESSAGE HANDLER =================
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    if not msg or not msg.text:
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    if not msg:
         return
 
     if update.effective_chat.type == "private":
@@ -117,17 +135,32 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not cfg or not cfg.get("enabled"):
         return
 
-    if await is_admin(update, context, msg.from_user.id):
-        return
+    # -------- TEXT --------
+    if msg.text or msg.caption:
+        text = msg.text or msg.caption
+        print("🔎 TEXT:", text)
 
-    print("🔎 SCANNING:", msg.text)
+        if scan_text_api(text):
+            try:
+                await msg.delete()
+                print("❌ NSFW TEXT DELETED")
+                return
+            except Exception as e:
+                print("DELETE ERROR:", e)
 
-    if scan_text_api(msg.text):
+    # -------- IMAGE --------
+    if msg.photo:
         try:
-            await msg.delete()
-            print("❌ NSFW MESSAGE DELETED")
+            file = await msg.photo[-1].get_file()
+            path = f"/tmp/{file.file_unique_id}.jpg"
+            await file.download_to_drive(path)
+
+            print("🔎 IMAGE SCAN")
+            if scan_image_api(path):
+                await msg.delete()
+                print("❌ NSFW IMAGE DELETED")
         except Exception as e:
-            print("🚫 DELETE FAILED:", e)
+            print("IMAGE DELETE ERROR:", e)
 
 
 # ================= MAIN =================
@@ -138,10 +171,9 @@ def main():
     app.add_handler(CommandHandler("nsfw", nsfw_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
 
-    # IMPORTANT FILTER
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    app.add_handler(MessageHandler(filters.ALL, message_handler))
 
-    print("🤖 NSFW Bot running")
+    print("🤖 NSFW bot running")
     app.run_polling()
 
 
