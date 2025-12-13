@@ -1,7 +1,7 @@
 {
   "name": "Nexa NSFW Moderation Bot",
   "description": "AI-powered Telegram NSFW moderation bot with image detection, text AI filtering, bad word & link protection, warnings and auto mute.",
-  "repository": "https://github.com/sexyxcoders/nexa-nfsw-bot",
+  "repository": "https://github.com/sexyxcoders/nexa-nsfw-bot",
   "keywords": [
     "telegram",
     "nsfw",
@@ -19,12 +19,6 @@
     "MONGO_URL": {
       "description": "MongoDB Atlas connection string",
       "required": true
-    }
-  },
-  "formation": {
-    "worker": {
-      "quantity": 1,
-      "size": "eco"
     }
   },
   "addons": [],
