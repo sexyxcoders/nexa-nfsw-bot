@@ -29,15 +29,18 @@ groups = db["groups"]
 print("✅ MongoDB connected")
 
 # ================= HELPERS =================
-async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        m = await context.bot.get_chat_member(update.effective_chat.id, user_id)
-        return m.status in ("administrator", "creator")
+        member = await context.bot.get_chat_member(
+            update.effective_chat.id,
+            update.effective_user.id
+        )
+        return member.status in ("administrator", "creator")
     except:
         return False
 
 
-def scan_text_api(text: str) -> bool:
+def scan_text(text: str) -> bool:
     text_l = text.lower()
 
     # Fast bad-word check
@@ -60,7 +63,7 @@ def scan_text_api(text: str) -> bool:
         return False
 
 
-def scan_image_api(path: str) -> bool:
+def scan_image(path: str) -> bool:
     try:
         with open(path, "rb") as f:
             r = requests.post(
@@ -78,13 +81,13 @@ def scan_image_api(path: str) -> bool:
 
 # ================= COMMANDS =================
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.effective_message.reply_text(
+    await update.message.reply_text(
         "🛡 NSFW Detector Bot\n\n"
-        "Commands:\n"
+        "Admin commands:\n"
         "/nsfw enable\n"
         "/nsfw disable\n"
         "/stats\n\n"
-        "⚠️ Bot deletes NSFW text & images (admins included)."
+        "Deletes NSFW text, images, GIFs, stickers & videos."
     )
 
 
@@ -92,12 +95,12 @@ async def nsfw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
         return
 
-    if not await is_admin(update, context, update.effective_user.id):
-        await update.effective_message.reply_text("❌ Admins only")
+    if not await is_admin(update, context):
+        await update.message.reply_text("❌ Admins only")
         return
 
     if not context.args:
-        await update.effective_message.reply_text("Use: /nsfw enable | disable")
+        await update.message.reply_text("Use: /nsfw enable | disable")
         return
 
     enable = context.args[0].lower() == "enable"
@@ -108,7 +111,7 @@ async def nsfw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         upsert=True
     )
 
-    await update.effective_message.reply_text(
+    await update.message.reply_text(
         "✅ NSFW filter enabled" if enable else "❌ NSFW filter disabled"
     )
 
@@ -117,22 +120,27 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     e = groups.count_documents({"enabled": True})
     d = groups.count_documents({"enabled": False})
 
-    await update.effective_message.reply_text(
-        f"📊 Stats\nEnabled groups: {e}\nDisabled groups: {d}"
+    await update.message.reply_text(
+        f"📊 Stats\n\n"
+        f"Enabled groups: {e}\n"
+        f"Disabled groups: {d}"
     )
 
 
 # ================= MESSAGE HANDLER =================
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
-    if not msg:
-        return
-
-    if update.effective_chat.type == "private":
+    if not msg or update.effective_chat.type == "private":
         return
 
     cfg = groups.find_one({"chat_id": update.effective_chat.id})
     if not cfg or not cfg.get("enabled"):
+        return
+
+    # -------- BLOCK MEDIA TYPES --------
+    if msg.sticker or msg.animation or msg.video:
+        await msg.delete()
+        print("❌ MEDIA DELETED")
         return
 
     # -------- TEXT --------
@@ -140,27 +148,21 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = msg.text or msg.caption
         print("🔎 TEXT:", text)
 
-        if scan_text_api(text):
-            try:
-                await msg.delete()
-                print("❌ NSFW TEXT DELETED")
-                return
-            except Exception as e:
-                print("DELETE ERROR:", e)
+        if scan_text(text):
+            await msg.delete()
+            print("❌ NSFW TEXT DELETED")
+            return
 
     # -------- IMAGE --------
     if msg.photo:
-        try:
-            file = await msg.photo[-1].get_file()
-            path = f"/tmp/{file.file_unique_id}.jpg"
-            await file.download_to_drive(path)
+        file = await msg.photo[-1].get_file()
+        path = f"/tmp/{file.file_unique_id}.jpg"
+        await file.download_to_drive(path)
 
-            print("🔎 IMAGE SCAN")
-            if scan_image_api(path):
-                await msg.delete()
-                print("❌ NSFW IMAGE DELETED")
-        except Exception as e:
-            print("IMAGE DELETE ERROR:", e)
+        print("🔎 IMAGE SCAN")
+        if scan_image(path):
+            await msg.delete()
+            print("❌ NSFW IMAGE DELETED")
 
 
 # ================= MAIN =================
@@ -170,7 +172,6 @@ def main():
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("nsfw", nsfw_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
-
     app.add_handler(MessageHandler(filters.ALL, message_handler))
 
     print("🤖 NSFW bot running")
