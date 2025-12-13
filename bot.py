@@ -24,10 +24,10 @@ groups = db.groups
 print("✅ MongoDB connected")
 
 # ================= HELPERS =================
-async def is_admin(chat_id: int, user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+async def is_admin(chat_id: int, user_id: int, context: ContextTypes.DEFAULT_TYPE):
     try:
-        member = await context.bot.get_chat_member(chat_id, user_id)
-        return member.status in ("administrator", "creator")
+        m = await context.bot.get_chat_member(chat_id, user_id)
+        return m.status in ("administrator", "creator")
     except:
         return False
 
@@ -39,8 +39,9 @@ def scan_text(text: str) -> bool:
             json={"text": text},
             timeout=10
         )
-        print("🧠 TEXT API:", r.text)
-        return r.json().get("nsfw", False)
+        data = r.json()
+        print("🧠 TEXT API:", data)
+        return data.get("safe") is False
     except Exception as e:
         print("TEXT API ERROR:", e)
         return False
@@ -54,8 +55,9 @@ def scan_image(path: str) -> bool:
                 files={"file": ("image.jpg", f, "image/jpeg")},
                 timeout=15
             )
-        print("🖼 IMAGE API:", r.text)
-        return r.json().get("nsfw", False)
+        data = r.json()
+        print("🖼 IMAGE API:", data)
+        return data.get("safe") is False
     except Exception as e:
         print("IMAGE API ERROR:", e)
         return False
@@ -69,7 +71,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/nsfw enable\n"
         "/nsfw disable\n"
         "/stats\n\n"
-        "⚠️ Bot must be admin with *Delete Messages* permission.",
+        "⚠️ Bot must be admin with Delete permission.",
         parse_mode="Markdown"
     )
 
@@ -105,13 +107,13 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.effective_message.reply_text(
         f"📊 **Bot Stats**\n\n"
-        f"✅ Enabled groups: {e}\n"
-        f"❌ Disabled groups: {d}",
+        f"Enabled groups: {e}\n"
+        f"Disabled groups: {d}",
         parse_mode="Markdown"
     )
 
 
-# ================= MESSAGE WATCHER =================
+# ================= WATCHER =================
 async def watcher(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     chat = update.effective_chat
@@ -125,25 +127,25 @@ async def watcher(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not cfg or not cfg.get("enabled"):
         return
 
-    async def safe_delete():
+    async def delete():
         try:
             await context.bot.delete_message(chat.id, msg.message_id)
             print("❌ MESSAGE DELETED")
         except Exception as e:
             print("🚫 DELETE FAILED:", e)
 
-    # 🚫 BLOCK MEDIA (GIF / VIDEO / STICKER)
+    # 🚫 Auto-block media
     if msg.animation or msg.video or msg.sticker:
-        await safe_delete()
+        await delete()
         return
 
-    # 📝 TEXT
+    # 📝 Text
     if msg.text or msg.caption:
         if scan_text(msg.text or msg.caption):
-            await safe_delete()
+            await delete()
             return
 
-    # 🖼 IMAGE
+    # 🖼 Image
     if msg.photo:
         try:
             file = await msg.photo[-1].get_file()
@@ -151,7 +153,7 @@ async def watcher(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await file.download_to_drive(path)
 
             if scan_image(path):
-                await safe_delete()
+                await delete()
         except Exception as e:
             print("IMAGE ERROR:", e)
 
@@ -163,7 +165,6 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("nsfw", nsfw))
     app.add_handler(CommandHandler("stats", stats))
-
     app.add_handler(MessageHandler(filters.ALL, watcher))
 
     print("🤖 Nexa NSFW Bot running")
