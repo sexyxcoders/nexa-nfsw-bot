@@ -14,52 +14,36 @@ from pymongo import MongoClient
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URL = os.getenv("MONGO_URL")
 
-# ✅ CORRECT API ENDPOINT
 NSFW_API = "https://NexaCoders-nexa-api.hf.space/scan"
 
-BAD_WORDS = [
-    "sex", "porn", "nude", "boobs", "fuck",
-    "hentai", "xxx", "slut", "bitch"
-]
-
 # ================= DATABASE =================
-client = MongoClient(MONGO_URL)
-db = client["nsfw_bot"]
-groups = db["groups"]
+mongo = MongoClient(MONGO_URL)
+db = mongo["nexa_nsfw"]
+groups = db.groups
 
 print("✅ MongoDB connected")
 
 # ================= HELPERS =================
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        member = await context.bot.get_chat_member(
+        m = await context.bot.get_chat_member(
             update.effective_chat.id,
             update.effective_user.id
         )
-        return member.status in ("administrator", "creator")
+        return m.status in ("administrator", "creator")
     except:
         return False
 
 
 def scan_text(text: str) -> bool:
-    text_l = text.lower()
-
-    # Fast bad-word check
-    for w in BAD_WORDS:
-        if w in text_l:
-            print("❌ BAD WORD HIT:", w)
-            return True
-
-    # AI scan
     try:
         r = requests.post(
             NSFW_API,
             json={"text": text},
             timeout=10
         )
-        print("🧠 RAW TEXT RESPONSE:", r.text)
-        data = r.json()
-        return bool(data.get("nsfw", False))
+        print("TEXT API:", r.text)
+        return r.json().get("nsfw", False)
     except Exception as e:
         print("TEXT API ERROR:", e)
         return False
@@ -71,113 +55,107 @@ def scan_image(path: str) -> bool:
             r = requests.post(
                 NSFW_API,
                 files={"file": ("image.jpg", f, "image/jpeg")},
-                timeout=20
+                timeout=15
             )
-
-        print("🖼 RAW IMAGE RESPONSE:", r.text)
-        data = r.json()
-        return bool(data.get("nsfw", False))
+        print("IMAGE API:", r.text)
+        return r.json().get("nsfw", False)
     except Exception as e:
         print("IMAGE API ERROR:", e)
         return False
 
 
 # ================= COMMANDS =================
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🛡 NSFW Detector Bot\n\n"
+        "🛡 Nexa NSFW Detector Bot\n\n"
         "Admin commands:\n"
         "/nsfw enable\n"
         "/nsfw disable\n"
         "/stats\n\n"
-        "Deletes NSFW text, images, GIFs, stickers & videos."
+        "⚠️ Bot must be admin with delete permission."
     )
 
 
-async def nsfw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def nsfw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
         return
 
     if not await is_admin(update, context):
-        await update.message.reply_text("❌ Admins only")
-        return
+        return await update.message.reply_text("❌ Admins only")
 
     if not context.args:
-        await update.message.reply_text("Use: /nsfw enable | disable")
-        return
+        return await update.message.reply_text("/nsfw enable | disable")
 
-    enable = context.args[0].lower() == "enable"
+    enabled = context.args[0].lower() == "enable"
 
     groups.update_one(
         {"chat_id": update.effective_chat.id},
-        {"$set": {"enabled": enable}},
+        {"$set": {"enabled": enabled}},
         upsert=True
     )
 
     await update.message.reply_text(
-        "✅ NSFW filter enabled" if enable else "❌ NSFW filter disabled"
+        "✅ NSFW filter enabled" if enabled else "❌ NSFW filter disabled"
     )
 
 
-async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     e = groups.count_documents({"enabled": True})
     d = groups.count_documents({"enabled": False})
 
     await update.message.reply_text(
-        f"📊 Stats\n\nEnabled groups: {e}\nDisabled groups: {d}"
+        f"📊 Bot Stats\n\n"
+        f"Enabled groups: {e}\n"
+        f"Disabled groups: {d}"
     )
 
 
-# ================= MESSAGE HANDLER =================
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ================= MESSAGE WATCHER =================
+async def watcher(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if not msg or update.effective_chat.type == "private":
         return
 
     cfg = groups.find_one({"chat_id": update.effective_chat.id})
-    print("⚙ GROUP CFG:", cfg)
+    print("CFG:", cfg)
 
     if not cfg or not cfg.get("enabled"):
         return
 
-    # -------- BLOCK MEDIA TYPES --------
-    if msg.sticker or msg.animation or msg.video:
+    # 🚫 Block GIF / Video / Sticker instantly
+    if msg.animation or msg.video or msg.sticker:
         await msg.delete()
-        print("❌ MEDIA DELETED")
+        print("MEDIA DELETED")
         return
 
-    # -------- TEXT --------
+    # 📝 Text
     if msg.text or msg.caption:
-        text = msg.text or msg.caption
-        print("🔎 TEXT:", text)
-
-        if scan_text(text):
+        if scan_text(msg.text or msg.caption):
             await msg.delete()
-            print("❌ NSFW TEXT DELETED")
+            print("TEXT DELETED")
             return
 
-    # -------- IMAGE --------
+    # 🖼 Image
     if msg.photo:
         file = await msg.photo[-1].get_file()
         path = f"/tmp/{file.file_unique_id}.jpg"
         await file.download_to_drive(path)
 
-        print("🔎 IMAGE SCAN")
         if scan_image(path):
             await msg.delete()
-            print("❌ NSFW IMAGE DELETED")
+            print("IMAGE DELETED")
 
 
 # ================= MAIN =================
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("nsfw", nsfw_cmd))
-    app.add_handler(CommandHandler("stats", stats_cmd))
-    app.add_handler(MessageHandler(filters.ALL, message_handler))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("nsfw", nsfw))
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(MessageHandler(filters.ALL, watcher))
 
-    print("🤖 NSFW bot running")
+    print("🤖 Nexa NSFW Bot running")
     app.run_polling(drop_pending_updates=True)
 
 
