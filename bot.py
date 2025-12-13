@@ -14,7 +14,8 @@ from pymongo import MongoClient
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URL = os.getenv("MONGO_URL")
 
-NSFW_API = "https://NexaCoders-nexa-api.hf.space"
+# ✅ CORRECT API ENDPOINT
+NSFW_API = "https://NexaCoders-nexa-api.hf.space/scan"
 
 BAD_WORDS = [
     "sex", "porn", "nude", "boobs", "fuck",
@@ -46,6 +47,7 @@ def scan_text(text: str) -> bool:
     # Fast bad-word check
     for w in BAD_WORDS:
         if w in text_l:
+            print("❌ BAD WORD HIT:", w)
             return True
 
     # AI scan
@@ -55,9 +57,9 @@ def scan_text(text: str) -> bool:
             json={"text": text},
             timeout=10
         )
+        print("🧠 RAW TEXT RESPONSE:", r.text)
         data = r.json()
-        print("🧠 TEXT API:", data)
-        return data.get("nsfw", False)
+        return bool(data.get("nsfw", False))
     except Exception as e:
         print("TEXT API ERROR:", e)
         return False
@@ -68,12 +70,13 @@ def scan_image(path: str) -> bool:
         with open(path, "rb") as f:
             r = requests.post(
                 NSFW_API,
-                files={"file": f},
-                timeout=15
+                files={"file": ("image.jpg", f, "image/jpeg")},
+                timeout=20
             )
+
+        print("🖼 RAW IMAGE RESPONSE:", r.text)
         data = r.json()
-        print("🖼 IMAGE API:", data)
-        return data.get("nsfw", False)
+        return bool(data.get("nsfw", False))
     except Exception as e:
         print("IMAGE API ERROR:", e)
         return False
@@ -121,9 +124,7 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     d = groups.count_documents({"enabled": False})
 
     await update.message.reply_text(
-        f"📊 Stats\n\n"
-        f"Enabled groups: {e}\n"
-        f"Disabled groups: {d}"
+        f"📊 Stats\n\nEnabled groups: {e}\nDisabled groups: {d}"
     )
 
 
@@ -134,6 +135,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     cfg = groups.find_one({"chat_id": update.effective_chat.id})
+    print("⚙ GROUP CFG:", cfg)
+
     if not cfg or not cfg.get("enabled"):
         return
 
@@ -175,7 +178,7 @@ def main():
     app.add_handler(MessageHandler(filters.ALL, message_handler))
 
     print("🤖 NSFW bot running")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
