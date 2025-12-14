@@ -17,49 +17,58 @@ from Nexa.database.client import (
     cache_scan_result
 )
 
-# ================= CONFIG =================
-API_ID = int(os.getenv("API_ID", "22657083"))
-API_HASH = os.getenv("API_HASH", "d6186691704bd901bdab275ceaab88f3")
+# =====================================================
+# CONFIG
+# =====================================================
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 NSFW_API_URL = "https://nexacoders-nexa-api.hf.space/scan"
 
-logging.basicConfig(level=logging.INFO)
+# =====================================================
+# LOGGING
+# =====================================================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
 logger = logging.getLogger("NexaNSFW")
 
-# ================= GLOBAL SESSION =================
-aiohttp_session: aiohttp.ClientSession | None = None
+# =====================================================
+# GLOBAL HTTP SESSION
+# =====================================================
+_http: aiohttp.ClientSession | None = None
 
 
-async def get_session():
-    global aiohttp_session
-    if aiohttp_session is None or aiohttp_session.closed:
-        aiohttp_session = aiohttp.ClientSession()
-    return aiohttp_session
+async def get_http():
+    global _http
+    if _http is None or _http.closed:
+        _http = aiohttp.ClientSession()
+    return _http
 
 
-# ================= IMAGE OPTIMIZATION =================
-def optimize_image(image_bytes: bytes) -> bytes:
-    """
-    Fast optimization:
-    - Skip if already small
-    - Resize to 256px JPEG (ViT friendly)
-    """
-    if len(image_bytes) < 50 * 1024:
-        return image_bytes
+# =====================================================
+# IMAGE OPTIMIZATION
+# =====================================================
+def optimize_image(raw: bytes) -> bytes:
+    if len(raw) < 50 * 1024:
+        return raw
 
     try:
-        img = Image.open(io.BytesIO(image_bytes))
+        img = Image.open(io.BytesIO(raw))
         img = img.convert("RGB")
         img.thumbnail((256, 256))
-        out = io.BytesIO()
-        img.save(out, format="JPEG", quality=80)
-        return out.getvalue()
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=80)
+        return buf.getvalue()
     except Exception:
-        return image_bytes
+        return raw
 
 
-# ================= FORMATTER =================
+# =====================================================
+# SCORE FORMATTER
+# =====================================================
 def format_scores(scores: dict) -> str:
     icons = {
         "neutral": "😐",
@@ -69,16 +78,16 @@ def format_scores(scores: dict) -> str:
         "hentai": "👾",
     }
 
-    lines = []
-    for k, v in sorted(scores.items(), key=lambda x: x[1], reverse=True):
-        icon = icons.get(k, "🔹")
-        lines.append(f"{icon} `{k.title():10} : {v*100:05.2f}%`")
-
-    return "\n".join(lines)
+    return "\n".join(
+        f"{icons.get(k,'🔹')} `{k.title():10} : {v*100:05.2f}%`"
+        for k, v in sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    )
 
 
-# ================= NSFW LOGIC =================
-def strict_check(scores: dict):
+# =====================================================
+# NSFW DECISION ENGINE
+# =====================================================
+def strict_nsfw_check(scores: dict):
     porn = scores.get("porn", 0)
     hentai = scores.get("hentai", 0)
     sexy = scores.get("sexy", 0)
@@ -95,15 +104,17 @@ def strict_check(scores: dict):
     return False, "Safe"
 
 
-# ================= CORE SCANNER =================
+# =====================================================
+# CORE SCANNER
+# =====================================================
 async def scan_media(client: Client, message: Message, manual=False):
     media = None
-    file_id = None
+    file_uid = None
     use_thumb = False
 
     if message.sticker:
         media = message.sticker
-        file_id = media.file_unique_id
+        file_uid = media.file_unique_id
         if media.is_animated or media.is_video:
             use_thumb = True
             if not media.thumbs:
@@ -111,24 +122,24 @@ async def scan_media(client: Client, message: Message, manual=False):
 
     elif message.photo:
         media = message.photo
-        file_id = media.file_unique_id
+        file_uid = media.file_unique_id
 
     elif message.document and message.document.mime_type:
         if "image" in message.document.mime_type:
             media = message.document
-            file_id = media.file_unique_id
+            file_uid = media.file_unique_id
         else:
-            return False, None, "Not Image"
+            return False, None, "Unsupported File"
 
     else:
-        return False, None, "Unsupported"
+        return False, None, "Unsupported Media"
 
     # ---------- CACHE ----------
     if not manual:
-        cached = await get_cached_scan(file_id)
+        cached = await get_cached_scan(file_uid)
         if cached:
-            is_nsfw, reason = strict_check(cached["data"]["scores"])
-            return is_nsfw, cached["data"], reason
+            verdict, reason = strict_nsfw_check(cached["data"]["scores"])
+            return verdict, cached["data"], reason
 
     # ---------- DOWNLOAD ----------
     try:
@@ -139,21 +150,16 @@ async def scan_media(client: Client, message: Message, manual=False):
             mem = await client.download_media(message, in_memory=True)
 
         raw = bytes(mem.getbuffer())
-        image_bytes = optimize_image(raw)
+        img = optimize_image(raw)
 
     except Exception:
         return False, None, "Download Failed"
 
     # ---------- API ----------
     try:
-        session = await get_session()
+        session = await get_http()
         form = aiohttp.FormData()
-        form.add_field(
-            "file",
-            image_bytes,
-            filename="scan.jpg",
-            content_type="image/jpeg",
-        )
+        form.add_field("file", img, filename="scan.jpg", content_type="image/jpeg")
 
         async with session.post(NSFW_API_URL, data=form, timeout=6) as r:
             if r.status != 200:
@@ -163,14 +169,14 @@ async def scan_media(client: Client, message: Message, manual=False):
     except Exception:
         return False, None, "Connection Error"
 
-    scores = data.get("scores", {})
-    is_nsfw, reason = strict_check(scores)
-
-    await cache_scan_result(file_id, not is_nsfw, data)
-    return is_nsfw, data, reason
+    verdict, reason = strict_nsfw_check(data.get("scores", {}))
+    await cache_scan_result(file_uid, not verdict, data)
+    return verdict, data, reason
 
 
-# ================= PYROGRAM APP =================
+# =====================================================
+# PYROGRAM CLIENT
+# =====================================================
 app = Client(
     "nexa_nsfw_bot",
     api_id=API_ID,
@@ -179,50 +185,47 @@ app = Client(
 )
 
 
-# ================= COMMANDS =================
+# =====================================================
+# COMMANDS
+# =====================================================
 @app.on_message(filters.command("nsfw") & filters.group)
 @AdminRights("can_delete_messages")
 async def nsfw_toggle(_, msg: Message):
     if len(msg.command) < 2:
-        status = await get_nsfw_status(msg.chat.id)
+        state = await get_nsfw_status(msg.chat.id)
         await msg.reply_text(
-            f"🛡 **NSFW System:** `{'Enabled' if status else 'Disabled'}`\n"
+            f"🛡 **NSFW System:** `{'Enabled' if state else 'Disabled'}`\n"
             "Usage: `/nsfw on` or `/nsfw off`"
         )
         return
 
     arg = msg.command[1].lower()
-    if arg in ("on", "enable"):
-        await set_nsfw_status(msg.chat.id, True)
-        await msg.reply_text("✅ NSFW protection enabled")
-    elif arg in ("off", "disable"):
-        await set_nsfw_status(msg.chat.id, False)
-        await msg.reply_text("❌ NSFW protection disabled")
+    await set_nsfw_status(msg.chat.id, arg in ("on", "enable"))
+    await msg.reply_text("✅ NSFW Enabled" if arg in ("on", "enable") else "❌ NSFW Disabled")
 
 
-# ================= MANUAL SCAN =================
+# =====================================================
+# MANUAL SCAN
+# =====================================================
 @app.on_message(filters.command("scan") & filters.reply)
 async def manual_scan(client: Client, msg: Message):
     status = await msg.reply_text("⚡ **Scanning…**")
     start = time.time()
 
-    is_nsfw, data, reason = await scan_media(client, msg.reply_to_message, manual=True)
+    verdict, data, reason = await scan_media(client, msg.reply_to_message, manual=True)
     took = time.time() - start
 
     if not data:
         await status.edit("❌ Scan failed")
         return
 
-    verdict = "🚨 **UNSAFE**" if is_nsfw else "✅ **SAFE**"
-    bar = "🟥" if is_nsfw else "🟩"
-
+    bar = "🟥" if verdict else "🟩"
     text = (
-        f"{verdict}\n"
+        f"{'🚨 **UNSAFE**' if verdict else '✅ **SAFE**'}\n"
         f"⏱️ Time: `{took:.3f}s`\n"
         f"🔎 Verdict: `{reason}`\n"
         f"{bar * 12}\n\n"
-        f"📊 **Confidence Scores:**\n"
-        f"{format_scores(data.get('scores', {}))}"
+        f"📊 **Confidence Scores:**\n{format_scores(data['scores'])}"
     )
 
     await status.edit(text)
@@ -230,32 +233,48 @@ async def manual_scan(client: Client, msg: Message):
     await status.delete()
 
 
-# ================= AUTO WATCHER =================
+# =====================================================
+# AUTO WATCHER
+# =====================================================
 @app.on_message(filters.group & (filters.photo | filters.sticker | filters.document))
 async def auto_nsfw(client: Client, msg: Message):
     if not await get_nsfw_status(msg.chat.id):
         return
 
-    is_nsfw, data, reason = await scan_media(client, msg)
+    verdict, data, reason = await scan_media(client, msg)
+    if not verdict or not data:
+        return
 
-    if is_nsfw and data:
-        try:
-            await msg.delete()
-        except:
-            return
+    try:
+        await msg.delete()
+    except Exception:
+        return
 
-        text = (
-            f"🚨 **NSFW Content Removed**\n"
-            f"👤 User: {msg.from_user.mention}\n"
-            f"🔎 Reason: `{reason}`\n\n"
-            f"📊 **AI Analysis:**\n"
-            f"{format_scores(data.get('scores', {}))}"
-        )
+    info = await client.send_message(
+        msg.chat.id,
+        f"🚨 **NSFW Content Removed**\n"
+        f"👤 User: {msg.from_user.mention}\n"
+        f"🔎 Reason: `{reason}`\n\n"
+        f"📊 **AI Analysis:**\n{format_scores(data['scores'])}"
+    )
 
-        info = await client.send_message(msg.chat.id, text)
-        await asyncio.sleep(20)
-        await info.delete()
+    await asyncio.sleep(20)
+    await info.delete()
 
 
-# ================= START =================
+# =====================================================
+# STARTUP
+# =====================================================
+logger.info("=" * 50)
+logger.info("🤖 Nexa NSFW Bot Loaded Successfully")
+logger.info("🚀 Developed by Team Nexa")
+logger.info("🛡️ AI-Powered Content Protection Active")
+logger.info("=" * 50)
+
+print("==============================================")
+print("🤖 Nexa NSFW Bot Loaded Successfully")
+print("🚀 Developed by Team Nexa")
+print("🛡️ AI-Powered Content Protection Active")
+print("==============================================")
+
 app.run()
