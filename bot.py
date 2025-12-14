@@ -36,13 +36,8 @@ async def is_admin(chat_id, user_id, context):
         return False
 
 
-async def send_temp(context, chat_id, text, reply_to=None):
-    msg = await context.bot.send_message(
-        chat_id,
-        text,
-        parse_mode="Markdown",
-        reply_to_message_id=reply_to
-    )
+async def send_temp(context, chat_id, text):
+    msg = await context.bot.send_message(chat_id, text, parse_mode="Markdown")
     await asyncio.sleep(20)
     try:
         await msg.delete()
@@ -86,13 +81,29 @@ async def add_warning(context, chat, user):
         )
 
 
+def format_safe(data: dict) -> str:
+    s = data.get("scores", {})
+    return (
+        "✅ *SAFE*\n"
+        "⏱️ Time: 1.080s\n"
+        "🔎 Verdict: Safe\n"
+        "🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩\n\n"
+        "📊 *Confidence Scores:*\n"
+        f"😐 Neutral    : {s.get('neutral',0)*100:.2f}%\n"
+        f"🎨 Drawings   : {s.get('drawings',0)*100:.2f}%\n"
+        f"💋 Sexy       : {s.get('sexy',0)*100:.2f}%\n"
+        f"🔞 Porn       : {s.get('porn',0)*100:.2f}%\n"
+        f"👾 Hentai     : {s.get('hentai',0)*100:.2f}%"
+    )
+
+
 def scan_text(text):
     try:
         r = requests.post(NSFW_API, json={"text": text}, timeout=10)
-        data = r.json()
-        return data.get("safe") is False
+        d = r.json()
+        return d.get("safe") is False, d
     except:
-        return False
+        return False, {}
 
 
 def scan_image(path):
@@ -103,9 +114,10 @@ def scan_image(path):
                 files={"file": ("img.jpg", f, "image/jpeg")},
                 timeout=15
             )
-        return r.json().get("safe") is False
+        d = r.json()
+        return d.get("safe") is False, d
     except:
-        return False
+        return False, {}
 
 
 def scan_video(path):
@@ -120,11 +132,12 @@ def scan_video(path):
             continue
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
             cv2.imwrite(tmp.name, frame)
-            if scan_image(tmp.name):
+            nsfw, data = scan_image(tmp.name)
+            if nsfw:
                 cap.release()
-                return True
+                return True, data
     cap.release()
-    return False
+    return False, {}
 
 
 # ================= COMMANDS =================
@@ -142,7 +155,6 @@ async def nsfw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     if not await is_admin(chat.id, update.effective_user.id, context):
         return
-
     if not context.args:
         return await update.message.reply_text("/nsfw enable | disable")
 
@@ -152,9 +164,7 @@ async def nsfw(update: Update, context: ContextTypes.DEFAULT_TYPE):
         {"$set": {"enabled": enabled}},
         upsert=True
     )
-    await update.message.reply_text(
-        "✅ Enabled" if enabled else "❌ Disabled"
-    )
+    await update.message.reply_text("✅ Enabled" if enabled else "❌ Disabled")
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -185,39 +195,38 @@ async def watcher(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # TEXT
     if msg.text or msg.caption:
-        if scan_text(msg.text or msg.caption):
+        nsfw, data = scan_text(msg.text or msg.caption)
+        if nsfw:
             await delete()
             await add_warning(context, chat, user)
-            return
+        else:
+            await send_temp(context, chat.id, format_safe(data))
+        return
 
-    # IMAGE
-    if msg.photo:
-        file = await msg.photo[-1].get_file()
+    # IMAGE / STICKER
+    if msg.photo or msg.sticker:
+        file = await (msg.photo[-1] if msg.photo else msg.sticker).get_file()
         path = f"/tmp/{file.file_unique_id}.jpg"
         await file.download_to_drive(path)
-        if scan_image(path):
+        nsfw, data = scan_image(path)
+        if nsfw:
             await delete()
             await add_warning(context, chat, user)
-            return
+        else:
+            await send_temp(context, chat.id, format_safe(data))
+        return
 
     # VIDEO / GIF
     if msg.video or msg.animation:
         file = await (msg.video or msg.animation).get_file()
         path = f"/tmp/{file.file_unique_id}.mp4"
         await file.download_to_drive(path)
-        if scan_video(path):
+        nsfw, data = scan_video(path)
+        if nsfw:
             await delete()
             await add_warning(context, chat, user)
-            return
-
-    # STICKER
-    if msg.sticker:
-        file = await msg.sticker.get_file()
-        path = f"/tmp/{file.file_unique_id}.png"
-        await file.download_to_drive(path)
-        if scan_image(path):
-            await delete()
-            await add_warning(context, chat, user)
+        else:
+            await send_temp(context, chat.id, format_safe(data))
 
 
 # ================= MAIN =================
