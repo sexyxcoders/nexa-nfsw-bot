@@ -1,9 +1,10 @@
 import os
 import cv2
 import asyncio
-import requests
 import tempfile
-from telegram import Update
+import requests
+from datetime import datetime
+from telegram import Update, ChatPermissions
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -22,11 +23,12 @@ NSFW_API = "https://NexaCoders-nexa-api.hf.space/scan"
 mongo = MongoClient(MONGO_URL)
 db = mongo["nexa_nsfw"]
 groups = db.groups
+warnings = db.warnings
 
 print("✅ MongoDB connected")
 
 # ================= HELPERS =================
-async def is_admin(chat_id: int, user_id: int, context):
+async def is_admin(chat_id, user_id, context):
     try:
         m = await context.bot.get_chat_member(chat_id, user_id)
         return m.status in ("administrator", "creator")
@@ -34,139 +36,133 @@ async def is_admin(chat_id: int, user_id: int, context):
         return False
 
 
-async def send_temp_message(context, chat_id, text, delay=20):
+async def send_temp(context, chat_id, text, reply_to=None):
     msg = await context.bot.send_message(
-        chat_id=chat_id,
-        text=text,
-        parse_mode="Markdown"
+        chat_id,
+        text,
+        parse_mode="Markdown",
+        reply_to_message_id=reply_to
     )
-    await asyncio.sleep(delay)
+    await asyncio.sleep(20)
     try:
         await msg.delete()
     except:
         pass
 
 
-def format_log(data: dict) -> str:
-    scores = data.get("scores", {})
-    return (
-        "> 📊 *Confidence Scores:*\n"
-        f"> 😐 Neutral    : {scores.get('neutral',0)*100:.2f}%\n"
-        f"> 🎨 Drawings   : {scores.get('drawings',0)*100:.2f}%\n"
-        f"> 💋 Sexy       : {scores.get('sexy',0)*100:.2f}%\n"
-        f"> 🔞 Porn       : {scores.get('porn',0)*100:.2f}%\n"
-        f"> 👾 Hentai     : {scores.get('hentai',0)*100:.2f}%"
+async def add_warning(context, chat, user):
+    rec = warnings.find_one({"chat_id": chat.id, "user_id": user.id})
+    count = rec["count"] + 1 if rec else 1
+
+    warnings.update_one(
+        {"chat_id": chat.id, "user_id": user.id},
+        {"$set": {"count": count}},
+        upsert=True
     )
 
-# ================= SCANNERS =================
-def scan_text(text: str):
+    if count < 3:
+        await send_temp(
+            context,
+            chat.id,
+            f"> ⚠️ *NSFW Warning {count}/3*\n> User: {user.first_name}"
+        )
+    else:
+        try:
+            await context.bot.restrict_chat_member(
+                chat.id,
+                user.id,
+                ChatPermissions(can_send_messages=False),
+                until_date=int(datetime.utcnow().timestamp()) + 600
+            )
+        except:
+            pass
+
+        warnings.delete_one({"chat_id": chat.id, "user_id": user.id})
+
+        await send_temp(
+            context,
+            chat.id,
+            f"> 🔇 *User Muted (10 min)*\n> Reason: NSFW (3 strikes)\n> User: {user.first_name}"
+        )
+
+
+def scan_text(text):
     try:
         r = requests.post(NSFW_API, json={"text": text}, timeout=10)
         data = r.json()
-        return data.get("safe") is False, data
+        return data.get("safe") is False
     except:
-        return False, {}
+        return False
 
 
-def scan_image(path: str):
+def scan_image(path):
     try:
         with open(path, "rb") as f:
             r = requests.post(
                 NSFW_API,
-                files={"file": ("image.jpg", f, "image/jpeg")},
+                files={"file": ("img.jpg", f, "image/jpeg")},
                 timeout=15
             )
-        data = r.json()
-        return data.get("safe") is False, data
+        return r.json().get("safe") is False
     except:
-        return False, {}
+        return False
 
 
-def scan_video(path: str):
+def scan_video(path):
     cap = cv2.VideoCapture(path)
-    frame_no = 0
-
+    i = 0
     while cap.isOpened():
         ok, frame = cap.read()
         if not ok:
             break
-
-        frame_no += 1
-        if frame_no % 15 != 0:
+        i += 1
+        if i % 15 != 0:
             continue
-
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
             cv2.imwrite(tmp.name, frame)
-            try:
-                with open(tmp.name, "rb") as f:
-                    r = requests.post(
-                        NSFW_API,
-                        files={"file": ("frame.jpg", f, "image/jpeg")},
-                        timeout=15
-                    )
-                data = r.json()
-                if data.get("safe") is False:
-                    cap.release()
-                    return True, data
-            except:
-                pass
-
+            if scan_image(tmp.name):
+                cap.release()
+                return True
     cap.release()
-    return False, {}
+    return False
+
 
 # ================= COMMANDS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "> 🛡 *Nexa NSFW Moderation Bot*\n>\n"
-        "> Admin Commands:\n"
-        "> /nsfw enable\n"
-        "> /nsfw disable\n"
-        "> /stats\n>\n"
-        "> Detects NSFW text, images, stickers, GIFs & videos\n"
-        "> Bot must have *Delete Messages* permission",
+        "🛡 *Nexa NSFW Moderation Bot*\n\n"
+        "> Detects NSFW text, images, GIFs, videos & stickers\n"
+        "> 3 warnings → auto mute\n\n"
+        "Admin:\n/nsfw enable | disable\n/stats",
         parse_mode="Markdown"
     )
 
 
 async def nsfw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
-    user = update.effective_user
-
-    if chat.type == "private":
+    if not await is_admin(chat.id, update.effective_user.id, context):
         return
 
-    if not await is_admin(chat.id, user.id, context):
-        return await update.message.reply_text("> ❌ Admins only", parse_mode="Markdown")
-
     if not context.args:
-        return await update.message.reply_text(
-            "> Usage: /nsfw enable | disable", parse_mode="Markdown"
-        )
+        return await update.message.reply_text("/nsfw enable | disable")
 
     enabled = context.args[0].lower() == "enable"
-
     groups.update_one(
         {"chat_id": chat.id},
         {"$set": {"enabled": enabled}},
         upsert=True
     )
-
     await update.message.reply_text(
-        "> ✅ NSFW filter enabled" if enabled else "> ❌ NSFW filter disabled",
-        parse_mode="Markdown"
+        "✅ Enabled" if enabled else "❌ Disabled"
     )
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    e = groups.count_documents({"enabled": True})
-    d = groups.count_documents({"enabled": False})
-
     await update.message.reply_text(
-        f"> 📊 *Bot Stats*\n>\n"
-        f"> Enabled Groups : {e}\n"
-        f"> Disabled Groups: {d}",
-        parse_mode="Markdown"
+        f"> Enabled Groups: {groups.count_documents({'enabled': True})}\n"
+        f"> Active Warnings: {warnings.count_documents({})}"
     )
+
 
 # ================= WATCHER =================
 async def watcher(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -181,79 +177,48 @@ async def watcher(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not cfg or not cfg.get("enabled"):
         return
 
-    async def safe_delete():
+    async def delete():
         try:
-            await context.bot.delete_message(chat.id, msg.message_id)
+            await msg.delete()
         except:
             pass
 
-    username = f"@{user.username}" if user.username else user.first_name
+    # TEXT
+    if msg.text or msg.caption:
+        if scan_text(msg.text or msg.caption):
+            await delete()
+            await add_warning(context, chat, user)
+            return
 
-    # 🎥 VIDEO / GIF
-    if msg.video or msg.animation:
-        file = await (msg.video or msg.animation).get_file()
-        path = f"/tmp/{file.file_unique_id}.mp4"
-        await file.download_to_drive(path)
-
-        nsfw, data = scan_video(path)
-        if nsfw:
-            await safe_delete()
-            await send_temp_message(
-                context,
-                chat.id,
-                f"> 🎥 *NSFW VIDEO DELETED*\n"
-                f"> User: {username}\n>\n"
-                f"{format_log(data)}"
-            )
-        return
-
-    # 🧩 STICKER
-    if msg.sticker:
-        file = await msg.sticker.get_file()
-        path = f"/tmp/{file.file_unique_id}.png"
-        await file.download_to_drive(path)
-
-        nsfw, data = scan_image(path)
-        if nsfw:
-            await safe_delete()
-            await send_temp_message(
-                context,
-                chat.id,
-                f"> 🧩 *NSFW STICKER DELETED*\n"
-                f"> User: {username}\n>\n"
-                f"{format_log(data)}"
-            )
-        return
-
-    # 🖼 IMAGE
+    # IMAGE
     if msg.photo:
         file = await msg.photo[-1].get_file()
         path = f"/tmp/{file.file_unique_id}.jpg"
         await file.download_to_drive(path)
+        if scan_image(path):
+            await delete()
+            await add_warning(context, chat, user)
+            return
 
-        nsfw, data = scan_image(path)
-        if nsfw:
-            await safe_delete()
-            await send_temp_message(
-                context,
-                chat.id,
-                f"> 🖼 *NSFW IMAGE DELETED*\n"
-                f"> User: {username}\n>\n"
-                f"{format_log(data)}"
-            )
-        return
+    # VIDEO / GIF
+    if msg.video or msg.animation:
+        file = await (msg.video or msg.animation).get_file()
+        path = f"/tmp/{file.file_unique_id}.mp4"
+        await file.download_to_drive(path)
+        if scan_video(path):
+            await delete()
+            await add_warning(context, chat, user)
+            return
 
-    # 📝 TEXT
-    if msg.text or msg.caption:
-        nsfw, _ = scan_text(msg.text or msg.caption)
-        if nsfw:
-            await safe_delete()
-            await send_temp_message(
-                context,
-                chat.id,
-                f"> 📝 *NSFW TEXT DELETED*\n"
-                f"> User: {username}"
-            )
+    # STICKER
+    if msg.sticker:
+        file = await msg.sticker.get_file()
+        path = f"/tmp/{file.file_unique_id}.png"
+        await file.download_to_drive(path)
+        if scan_image(path):
+            await delete()
+            await add_warning(context, chat, user)
+
 
 # ================= MAIN =================
 def main():
