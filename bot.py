@@ -104,18 +104,19 @@ def format_scores(scores: dict) -> str:
 # NSFW DECISION ENGINE
 # =====================================================
 def strict_nsfw(scores: dict):
-    porn = scores.get("porn", 0)
-    hentai = scores.get("hentai", 0)
-    sexy = scores.get("sexy", 0)
+    porn = scores.get("porn", 0.0)
+    hentai = scores.get("hentai", 0.0)
+    sexy = scores.get("sexy", 0.0)
 
-    if porn > 0.08:
-        return True, "Pornographic Content"
-    if hentai > 0.15:
-        return True, "Hentai Content"
-    if sexy > 0.45:
-        return True, "Explicit Content"
-    if porn + hentai + sexy > 0.40:
-        return True, "High Risk NSFW"
+    # 🔥 2% STRICT RULE
+    if porn >= 0.02:
+        return True, f"Pornographic Content ({porn*100:.1f}%)"
+
+    if hentai >= 0.02:
+        return True, f"Hentai Content ({hentai*100:.1f}%)"
+
+    if sexy >= 0.02:
+        return True, f"Sexual Content ({sexy*100:.1f}%)"
 
     return False, "Safe"
 
