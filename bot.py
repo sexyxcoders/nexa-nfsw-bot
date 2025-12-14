@@ -1,8 +1,8 @@
 import os
 import cv2
+import asyncio
 import requests
 import tempfile
-from datetime import datetime
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -21,9 +21,7 @@ NSFW_API = "https://NexaCoders-nexa-api.hf.space/scan"
 # ================= DATABASE =================
 mongo = MongoClient(MONGO_URL)
 db = mongo["nexa_nsfw"]
-
-groups = db.groups     # group settings
-clones = db.clones     # cloned bot tokens
+groups = db.groups
 
 print("✅ MongoDB connected")
 
@@ -36,26 +34,29 @@ async def is_admin(chat_id: int, user_id: int, context):
         return False
 
 
-async def get_admin_mentions(context, chat_id):
-    admins = await context.bot.get_chat_administrators(chat_id)
-    mentions = []
-    for a in admins:
-        if a.user.username:
-            mentions.append(f"@{a.user.username}")
-    return " ".join(mentions) if mentions else "👮 Admins"
+async def send_temp_message(context, chat_id, text, delay=20):
+    msg = await context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        parse_mode="Markdown"
+    )
+    await asyncio.sleep(delay)
+    try:
+        await msg.delete()
+    except:
+        pass
 
 
 def format_log(data: dict) -> str:
     scores = data.get("scores", {})
     return (
-        "📊 *Confidence Scores:*\n"
-        f"😐 Neutral    : {scores.get('neutral',0)*100:.2f}%\n"
-        f"🎨 Drawings   : {scores.get('drawings',0)*100:.2f}%\n"
-        f"💋 Sexy       : {scores.get('sexy',0)*100:.2f}%\n"
-        f"🔞 Porn       : {scores.get('porn',0)*100:.2f}%\n"
-        f"👾 Hentai     : {scores.get('hentai',0)*100:.2f}%"
+        "> 📊 *Confidence Scores:*\n"
+        f"> 😐 Neutral    : {scores.get('neutral',0)*100:.2f}%\n"
+        f"> 🎨 Drawings   : {scores.get('drawings',0)*100:.2f}%\n"
+        f"> 💋 Sexy       : {scores.get('sexy',0)*100:.2f}%\n"
+        f"> 🔞 Porn       : {scores.get('porn',0)*100:.2f}%\n"
+        f"> 👾 Hentai     : {scores.get('hentai',0)*100:.2f}%"
     )
-
 
 # ================= SCANNERS =================
 def scan_text(text: str):
@@ -96,7 +97,6 @@ def scan_video(path: str):
 
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
             cv2.imwrite(tmp.name, frame)
-
             try:
                 with open(tmp.name, "rb") as f:
                     r = requests.post(
@@ -117,14 +117,13 @@ def scan_video(path: str):
 # ================= COMMANDS =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🛡 **Nexa NSFW Moderation Bot**\n\n"
-        "👮 Admin:\n"
-        "/nsfw enable | disable\n"
-        "/stats\n\n"
-        "🧬 Public:\n"
-        "/clone – clone this bot\n"
-        "/revoke – revoke clone\n\n"
-        "⚠️ Bot must have *Delete Messages* permission",
+        "> 🛡 *Nexa NSFW Moderation Bot*\n>\n"
+        "> Admin Commands:\n"
+        "> /nsfw enable\n"
+        "> /nsfw disable\n"
+        "> /stats\n>\n"
+        "> Detects NSFW text, images, stickers, GIFs & videos\n"
+        "> Bot must have *Delete Messages* permission",
         parse_mode="Markdown"
     )
 
@@ -137,10 +136,12 @@ async def nsfw(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not await is_admin(chat.id, user.id, context):
-        return await update.message.reply_text("❌ Admins only")
+        return await update.message.reply_text("> ❌ Admins only", parse_mode="Markdown")
 
     if not context.args:
-        return await update.message.reply_text("/nsfw enable | disable")
+        return await update.message.reply_text(
+            "> Usage: /nsfw enable | disable", parse_mode="Markdown"
+        )
 
     enabled = context.args[0].lower() == "enable"
 
@@ -151,42 +152,21 @@ async def nsfw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(
-        "✅ NSFW filter enabled" if enabled else "❌ NSFW filter disabled"
+        "> ✅ NSFW filter enabled" if enabled else "> ❌ NSFW filter disabled",
+        parse_mode="Markdown"
     )
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     e = groups.count_documents({"enabled": True})
     d = groups.count_documents({"enabled": False})
-    c = clones.count_documents({})
 
     await update.message.reply_text(
-        f"📊 **Bot Stats**\n\n"
-        f"Enabled Groups: {e}\n"
-        f"Disabled Groups: {d}\n"
-        f"Cloned Bots: {c}",
+        f"> 📊 *Bot Stats*\n>\n"
+        f"> Enabled Groups : {e}\n"
+        f"> Disabled Groups: {d}",
         parse_mode="Markdown"
     )
-
-
-# ================= CLONE SYSTEM =================
-async def clone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["awaiting_clone_token"] = True
-    await update.message.reply_text(
-        "🧬 **Clone Nexa NSFW Bot**\n\n"
-        "1️⃣ Create a bot via @BotFather\n"
-        "2️⃣ Send the *BOT TOKEN* here\n\n"
-        "⚠️ Send only the token",
-        parse_mode="Markdown"
-    )
-
-
-async def revoke(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    res = clones.delete_one({"owner_id": update.effective_user.id})
-    if res.deleted_count:
-        await update.message.reply_text("🗑️ Clone revoked successfully")
-    else:
-        await update.message.reply_text("ℹ️ No active clone found")
 
 # ================= WATCHER =================
 async def watcher(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -194,33 +174,7 @@ async def watcher(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     user = msg.from_user if msg else None
 
-    if not msg:
-        return
-
-    # ---- CLONE TOKEN INPUT ----
-    if context.user_data.get("awaiting_clone_token") and msg.text:
-        token = msg.text.strip()
-
-        if ":" not in token:
-            return await msg.reply_text("❌ Invalid BOT TOKEN")
-
-        clones.update_one(
-            {"owner_id": user.id},
-            {"$set": {
-                "bot_token": token,
-                "created_at": datetime.utcnow()
-            }},
-            upsert=True
-        )
-
-        context.user_data["awaiting_clone_token"] = False
-        return await msg.reply_text(
-            "✅ Clone saved!\n\n"
-            "🚀 Deploy it on Heroku using your own repo."
-        )
-
-    # ---- GROUP ONLY ----
-    if chat.type == "private":
+    if not msg or chat.type == "private":
         return
 
     cfg = groups.find_one({"chat_id": chat.id})
@@ -230,61 +184,75 @@ async def watcher(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async def safe_delete():
         try:
             await context.bot.delete_message(chat.id, msg.message_id)
-        except Exception as e:
-            print("DELETE FAILED:", e)
+        except:
+            pass
 
     username = f"@{user.username}" if user.username else user.first_name
-    admins = await get_admin_mentions(context, chat.id)
 
-    # ===== VIDEO / GIF =====
+    # 🎥 VIDEO / GIF
     if msg.video or msg.animation:
         file = await (msg.video or msg.animation).get_file()
         path = f"/tmp/{file.file_unique_id}.mp4"
         await file.download_to_drive(path)
 
-        is_nsfw, data = scan_video(path)
-        if is_nsfw:
+        nsfw, data = scan_video(path)
+        if nsfw:
             await safe_delete()
-            await context.bot.send_message(
+            await send_temp_message(
+                context,
                 chat.id,
-                f"{admins}\n\n"
-                f"🎥 *NSFW VIDEO DELETED*\n"
-                f"👤 User: {username}\n\n"
-                f"{format_log(data)}",
-                parse_mode="Markdown"
+                f"> 🎥 *NSFW VIDEO DELETED*\n"
+                f"> User: {username}\n>\n"
+                f"{format_log(data)}"
             )
         return
 
-    # ===== TEXT =====
-    if msg.text or msg.caption:
-        is_nsfw, _ = scan_text(msg.text or msg.caption)
-        if is_nsfw:
-            await safe_delete()
-            await context.bot.send_message(
-                chat.id,
-                f"{admins}\n\n"
-                f"📝 *NSFW TEXT DELETED*\n"
-                f"👤 User: {username}",
-                parse_mode="Markdown"
-            )
-            return
+    # 🧩 STICKER
+    if msg.sticker:
+        file = await msg.sticker.get_file()
+        path = f"/tmp/{file.file_unique_id}.png"
+        await file.download_to_drive(path)
 
-    # ===== IMAGE =====
+        nsfw, data = scan_image(path)
+        if nsfw:
+            await safe_delete()
+            await send_temp_message(
+                context,
+                chat.id,
+                f"> 🧩 *NSFW STICKER DELETED*\n"
+                f"> User: {username}\n>\n"
+                f"{format_log(data)}"
+            )
+        return
+
+    # 🖼 IMAGE
     if msg.photo:
         file = await msg.photo[-1].get_file()
         path = f"/tmp/{file.file_unique_id}.jpg"
         await file.download_to_drive(path)
 
-        is_nsfw, data = scan_image(path)
-        if is_nsfw:
+        nsfw, data = scan_image(path)
+        if nsfw:
             await safe_delete()
-            await context.bot.send_message(
+            await send_temp_message(
+                context,
                 chat.id,
-                f"{admins}\n\n"
-                f"🖼 *NSFW IMAGE DELETED*\n"
-                f"👤 User: {username}\n\n"
-                f"{format_log(data)}",
-                parse_mode="Markdown"
+                f"> 🖼 *NSFW IMAGE DELETED*\n"
+                f"> User: {username}\n>\n"
+                f"{format_log(data)}"
+            )
+        return
+
+    # 📝 TEXT
+    if msg.text or msg.caption:
+        nsfw, _ = scan_text(msg.text or msg.caption)
+        if nsfw:
+            await safe_delete()
+            await send_temp_message(
+                context,
+                chat.id,
+                f"> 📝 *NSFW TEXT DELETED*\n"
+                f"> User: {username}"
             )
 
 # ================= MAIN =================
@@ -294,8 +262,6 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("nsfw", nsfw))
     app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CommandHandler("clone", clone))
-    app.add_handler(CommandHandler("revoke", revoke))
     app.add_handler(MessageHandler(filters.ALL, watcher))
 
     print("🤖 Nexa NSFW Bot running")
