@@ -1,2 +1,26 @@
-.env
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Env
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Virtual env
+venv/
+.env/
+
+# Media / temp
+*.jpg
+*.png
+*.mp4
+*.webm
+/tmp/
