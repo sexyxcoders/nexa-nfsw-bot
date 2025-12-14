@@ -1,4 +1,10 @@
-python-telegram-bot==20.7
-pymongo
-requests
-opencv-python-headless
+pyrogram==2.0.106
+tgcrypto==1.2.5
+
+aiohttp==3.9.5
+Pillow==10.3.0
+
+pymongo==4.7.2
+dnspython==2.6.1
+
+opencv-python-headless==4.10.0.84
