@@ -17,8 +17,8 @@ from Nexa.database.client import (
 )
 
 # ================= CONFIG =================
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
+API_ID = int(os.getenv("API_ID", "22657083"))
+API_HASH = os.getenv("API_HASH", "d6186691704bd901bdab275ceaab88f3")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 NSFW_API_URL = "https://nexacoders-nexa-api.hf.space/scan"
