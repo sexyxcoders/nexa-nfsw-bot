@@ -11,7 +11,7 @@ DB_NAME = os.getenv("DB_NAME", "nexa_nsfw")
 
 # ───────────────── REDIS CONFIG ─────────────────────
 # ⚠️ MUST be pure redis:// URL (no redis-cli)
-REDIS_URL = os.getenv("REDIS_URL", "")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 REDIS_TTL = int(os.getenv("REDIS_TTL", "3600"))  # 1 hour
 
 # ───────────────── NSFW API CONFIG ──────────────────
