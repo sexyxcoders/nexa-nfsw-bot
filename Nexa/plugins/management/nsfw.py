@@ -1,29 +1,23 @@
-import aiohttp
 import asyncio
 import io
+import aiohttp
 from PIL import Image
 
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
-from config import (
-    NSFW_API_URL,
-    NSFW_THRESHOLD,
-    LOG_DELETE_TIME
-)
-
+from config import NSFW_API_URL, NSFW_THRESHOLD, LOG_DELETE_TIME
 from Nexa.database.client import (
     get_nsfw_status,
     set_nsfw_status,
     get_cached_scan,
     cache_scan_result
 )
-
 from Nexa.database.redis import redis_get, redis_set
 from Nexa.utils.decorators import admin_only
 from Nexa.core.session import get_session
 
-# ───────── IMAGE OPTIMIZATION ─────────
+# ───────────────── IMAGE OPTIMIZATION ─────────────────
 
 def optimize_image(data: bytes) -> bytes:
     try:
@@ -34,49 +28,46 @@ def optimize_image(data: bytes) -> bytes:
         out = io.BytesIO()
         img.save(out, "JPEG", quality=80)
         return out.getvalue()
-    except:
+    except Exception:
         return data
 
-# ───────── UI FORMAT ─────────
+# ───────────────── UI FORMAT ─────────────────
 
-def score_ui(s: dict) -> str:
+def score_ui(scores: dict) -> str:
     return (
-        f"😐 Neutral    : {s.get('neutral',0)*100:05.2f}%\n"
-        f"🔞 Porn       : {s.get('porn',0)*100:05.2f}%\n"
-        f"💋 Sexy       : {s.get('sexy',0)*100:05.2f}%\n"
-        f"🎨 Drawings   : {s.get('drawings',0)*100:05.2f}%\n"
-        f"👾 Hentai     : {s.get('hentai',0)*100:05.2f}%"
+        f"😐 Neutral    : {scores.get('neutral', 0)*100:.2f}%\n"
+        f"🔞 Porn       : {scores.get('porn', 0)*100:.2f}%\n"
+        f"💋 Sexy       : {scores.get('sexy', 0)*100:.2f}%\n"
+        f"🎨 Drawings   : {scores.get('drawings', 0)*100:.2f}%\n"
+        f"👾 Hentai     : {scores.get('hentai', 0)*100:.2f}%"
     )
 
-# ───────── DETECTION LOGIC ─────────
+# ───────────────── DETECTION LOGIC ─────────────────
 
 def is_nsfw(scores: dict):
-    if scores.get("porn", 0) >= NSFW_THRESHOLD:
-        return True, f"Pornographic Content ({scores['porn']*100:.2f}%)"
-    if scores.get("hentai", 0) >= NSFW_THRESHOLD:
-        return True, f"Hentai Content ({scores['hentai']*100:.2f}%)"
-    if scores.get("sexy", 0) >= NSFW_THRESHOLD:
-        return True, f"Sexual Content ({scores['sexy']*100:.2f}%)"
+    for k in ("porn", "hentai", "sexy"):
+        if scores.get(k, 0) >= NSFW_THRESHOLD:
+            return True, f"{k.capitalize()} Content ({scores[k]*100:.2f}%)"
     return False, "Safe"
 
-# ───────── NSFW TOGGLE ─────────
+# ───────────────── COMMAND ─────────────────
 
 @Client.on_message(filters.command("nsfw") & filters.group)
 @admin_only
 async def nsfw_toggle(_, m: Message):
-    if len(m.command) == 1:
-        state = await get_nsfw_status(m.chat.id)
+    if len(m.command) < 2:
+        state = get_nsfw_status(m.chat.id)
         return await m.reply(f"🔞 NSFW is **{'ON' if state else 'OFF'}**")
 
     arg = m.command[1].lower()
     if arg in ("on", "enable"):
-        await set_nsfw_status(m.chat.id, True)
-        await m.reply("✅ NSFW **ENABLED**")
+        set_nsfw_status(m.chat.id, True)
+        await m.reply("✅ **NSFW ENABLED**")
     elif arg in ("off", "disable"):
-        await set_nsfw_status(m.chat.id, False)
-        await m.reply("❌ NSFW **DISABLED**")
+        set_nsfw_status(m.chat.id, False)
+        await m.reply("🛑 **NSFW DISABLED**")
 
-# ───────── WATCHER (FIXED FILTERS) ─────────
+# ───────────────── WATCHER ─────────────────
 
 @Client.on_message(
     filters.group & (
@@ -88,43 +79,49 @@ async def nsfw_toggle(_, m: Message):
 )
 async def nsfw_watcher(client: Client, m: Message):
 
-    if not await get_nsfw_status(m.chat.id):
+    # NSFW disabled
+    if not get_nsfw_status(m.chat.id):
         return
 
     media = m.photo or m.sticker or m.document
     file_id = media.file_unique_id
 
-    # ⚡ Redis fast cache
-    r = redis_get(file_id)
-    if r:
-        if r.get("bad"):
+    # ── Redis (fast cache)
+    cached = redis_get(file_id)
+    if cached:
+        if cached["bad"]:
             await m.delete()
         return
 
-    # 🧠 Mongo safe cache
-    cached = await get_cached_scan(file_id)
-    if cached and cached.get("safe") is True:
+    # ── Mongo safe cache
+    mongo_cache = await get_cached_scan(file_id)
+    if mongo_cache and mongo_cache.get("safe"):
         redis_set(file_id, {"bad": False})
         return
 
-    # 📥 Download
+    # ── Download media
     try:
-        f = await client.download_media(m, in_memory=True)
-        img = optimize_image(f.getvalue())
-    except:
+        buf = await client.download_media(m, in_memory=True)
+        img = optimize_image(buf.getvalue())
+    except Exception:
         return
 
-    # 🌐 API Scan
+    # ── API Scan
     try:
         session = await get_session()
         form = aiohttp.FormData()
-        form.add_field("file", img, filename="scan.jpg", content_type="image/jpeg")
+        form.add_field(
+            "file",
+            img,
+            filename="scan.jpg",
+            content_type="image/jpeg"
+        )
 
-        async with session.post(NSFW_API_URL, data=form, timeout=5) as resp:
-            if resp.status != 200:
+        async with session.post(NSFW_API_URL, data=form) as r:
+            if r.status != 200:
                 return
-            result = await resp.json()
-    except:
+            result = await r.json()
+    except Exception:
         return
 
     scores = result.get("scores", {})
@@ -136,7 +133,7 @@ async def nsfw_watcher(client: Client, m: Message):
     if not bad:
         return
 
-    # 🚨 DELETE & LOG
+    # ── Delete & log
     await m.delete()
 
     user = m.from_user.mention if m.from_user else "Deleted Account"
