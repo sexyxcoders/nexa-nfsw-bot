@@ -1,8 +1,8 @@
 import os
 
 # ───────────────── TELEGRAM CONFIG ─────────────────
-API_ID = int(os.getenv("API_ID", "0"))
-API_HASH = os.getenv("API_HASH", "")
+API_ID = int(os.getenv("API_ID", "22657083"))
+API_HASH = os.getenv("API_HASH", "d6186691704bd901bdab275ceaab88f3")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 # ───────────────── DATABASE CONFIG ──────────────────
