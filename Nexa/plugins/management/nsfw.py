@@ -3,12 +3,8 @@ from PIL import Image
 from pyrogram import Client, filters
 from pyrogram.types import Message
 
-from Nexa.database.client import (
-    set_nsfw_status,
-    get_nsfw_status,
-    get_cached_scan,
-    cache_scan_result
-)
+from config import NSFW_API_URL, NSFW_THRESHOLD, LOG_DELETE_TIME
+from Nexa.database.client import *
 from Nexa.database.redis import redis_get, redis_set
 from Nexa.utils.decorators import admin_only
 from Nexa.core.session import get_session
