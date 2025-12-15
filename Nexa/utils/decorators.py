@@ -1,34 +1,31 @@
 from functools import wraps
 from pyrogram.types import Message
-from pyrogram.errors import ChatAdminRequired
+
 
 def admin_only(func):
     @wraps(func)
-    async def wrapper(client, message: Message, *args, **kwargs):
+    async def wrapper(client, m: Message, *args, **kwargs):
 
-        # Must be group
-        if message.chat.type not in ("group", "supergroup"):
-            return await message.reply("❌ This command works only in groups.")
+        # ── Must be group or supergroup
+        if not m.chat or m.chat.type not in ("group", "supergroup"):
+            return await m.reply("❌ This command works only in groups.")
 
-        # Anonymous admin support
-        if message.sender_chat:
-            return await func(client, message, *args, **kwargs)
+        # ── Ignore messages without users (anonymous / channel)
+        if not m.from_user:
+            return
 
-        user = message.from_user
-        if not user:
-            return await message.reply("❌ Only group admins can use this.")
-
+        # ── Check admin permissions
         try:
-            member = await client.get_chat_member(message.chat.id, user.id)
-        except ChatAdminRequired:
-            return await message.reply("❌ Bot needs admin rights.")
+            member = await client.get_chat_member(
+                m.chat.id,
+                m.from_user.id
+            )
         except Exception:
-            return await message.reply("❌ Only group admins can use this.")
+            return await m.reply("❌ Unable to verify admin rights.")
 
-        # Allow creator or admin
-        if member.status in ("administrator", "creator"):
-            return await func(client, message, *args, **kwargs)
+        if member.status not in ("administrator", "creator"):
+            return await m.reply("❌ Only group admins can use this.")
 
-        return await message.reply("❌ Only group admins can use this.")
+        return await func(client, m, *args, **kwargs)
 
     return wrapper
