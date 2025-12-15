@@ -1,13 +1,12 @@
 from pyrogram import Client
-from Nexa.database.client import init_db
 import os
 
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-if not API_ID:
-    raise RuntimeError("API_ID missing")
+if not API_ID or not API_HASH or not BOT_TOKEN:
+    raise RuntimeError("❌ API_ID / API_HASH / BOT_TOKEN missing")
 
 app = Client(
     "nexa-nsfw-bot",
@@ -17,6 +16,5 @@ app = Client(
     plugins=dict(root="Nexa.plugins")
 )
 
-init_db()
 print("✅ Nexa NSFW Bot started")
 app.run()
