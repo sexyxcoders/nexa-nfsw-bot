@@ -10,7 +10,8 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://pikachuxivan_db_user:pikachuxi
 DB_NAME = os.getenv("DB_NAME", "nexa_nsfw")
 
 # ───────────────── REDIS CONFIG ─────────────────────
-REDIS_URL = os.getenv("REDIS_URL", "redis-cli -u redis://default:EoVeOmg0umOEOElJhkJaM1k4slrIQeag@redis-19314.c232.us-east-1-2.ec2.cloud.redislabs.com:19314")
+# ⚠️ MUST be pure redis:// URL (no redis-cli)
+REDIS_URL = os.getenv("REDIS_URL", "")
 REDIS_TTL = int(os.getenv("REDIS_TTL", "3600"))  # 1 hour
 
 # ───────────────── NSFW API CONFIG ──────────────────
@@ -20,15 +21,14 @@ NSFW_API_URL = os.getenv(
 )
 
 # ───────────────── NSFW THRESHOLD ───────────────────
-# 2% rule (porn / hentai / sexy)
 NSFW_THRESHOLD = float(os.getenv("NSFW_THRESHOLD", "0.02"))
 
 # ───────────────── IMAGE OPTIMIZATION ───────────────
-IMAGE_MAX_SIZE = int(os.getenv("IMAGE_MAX_SIZE", "256"))  # px
-IMAGE_MIN_BYTES = int(os.getenv("IMAGE_MIN_BYTES", "40960"))  # 40KB
+IMAGE_MAX_SIZE = int(os.getenv("IMAGE_MAX_SIZE", "256"))
+IMAGE_MIN_BYTES = int(os.getenv("IMAGE_MIN_BYTES", "40960"))
 
 # ───────────────── LOG SETTINGS ─────────────────────
-LOG_DELETE_TIME = int(os.getenv("LOG_DELETE_TIME", "15"))  # seconds
+LOG_DELETE_TIME = int(os.getenv("LOG_DELETE_TIME", "15"))
 
 # ───────────────── PERFORMANCE ──────────────────────
-HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "5"))  # seconds
+HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "5"))
