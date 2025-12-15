@@ -6,11 +6,11 @@ API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 # ───────────────── DATABASE CONFIG ──────────────────
-MONGO_URI = os.getenv("MONGO_URI", "")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://pikachuxivan_db_user:pikachuxivan@cluster0.9c3hko7.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 DB_NAME = os.getenv("DB_NAME", "nexa_nsfw")
 
 # ───────────────── REDIS CONFIG ─────────────────────
-REDIS_URL = os.getenv("REDIS_URL", "")
+REDIS_URL = os.getenv("REDIS_URL", "redis-cli -u redis://default:EoVeOmg0umOEOElJhkJaM1k4slrIQeag@redis-19314.c232.us-east-1-2.ec2.cloud.redislabs.com:19314")
 REDIS_TTL = int(os.getenv("REDIS_TTL", "3600"))  # 1 hour
 
 # ───────────────── NSFW API CONFIG ──────────────────
