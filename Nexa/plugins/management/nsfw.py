@@ -9,8 +9,6 @@ from Nexa.database.redis import redis_get, redis_set
 from Nexa.utils.decorators import admin_only
 from Nexa.core.session import get_session
 
-NSFW_API = "https://nexacoders-nexa-api.hf.space/scan"
-
 # ---------- IMAGE OPT ----------
 
 def optimize_image(data: bytes) -> bytes:
