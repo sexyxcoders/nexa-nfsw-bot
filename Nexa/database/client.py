@@ -1,16 +1,25 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 from config import MONGO_URI, DB_NAME
 
+# ─────────── MONGO CLIENT ───────────
+
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[DB_NAME]
+
 nsfw_col = db.nsfw
-
-
-# ─────────── STATS COLLECTIONS ───────────
-
 users_col = db.users
 chats_col = db.chats
+scans_col = db.scans
 
+
+# ─────────── INIT DB (OPTIONAL) ───────────
+
+async def init_db():
+    # Just ensures connection is created
+    await db.command("ping")
+
+
+# ─────────── USER / CHAT TRACKING ───────────
 
 async def add_user(user_id: int):
     await users_col.update_one(
@@ -28,10 +37,15 @@ async def add_chat(chat_id: int):
     )
 
 
-async def get_stats():
+# ─────────── GLOBAL STATS (🔥 REQUIRED) ───────────
+
+async def get_global_stats():
     users = await users_col.count_documents({})
     chats = await chats_col.count_documents({})
     return users, chats
+
+
+# ─────────── NSFW SETTINGS ───────────
 
 async def get_nsfw_status(chat_id: int) -> bool:
     data = await nsfw_col.find_one({"_id": chat_id})
@@ -46,12 +60,14 @@ async def set_nsfw_status(chat_id: int, state: bool):
     )
 
 
+# ─────────── SCAN CACHE ───────────
+
 async def get_cached_scan(file_id: str):
-    return await db.scans.find_one({"_id": file_id})
+    return await scans_col.find_one({"_id": file_id})
 
 
 async def cache_scan_result(file_id: str, safe: bool, data: dict):
-    await db.scans.update_one(
+    await scans_col.update_one(
         {"_id": file_id},
         {"$set": {"safe": safe, "data": data}},
         upsert=True
