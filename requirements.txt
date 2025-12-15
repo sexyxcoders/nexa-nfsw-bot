@@ -4,7 +4,7 @@ tgcrypto==1.2.5
 aiohttp==3.9.5
 Pillow==10.2.0
 
-pymongo==4.5.1
+pymongo==4.5.0
 dnspython==2.6.1
 
 redis==5.0.4
