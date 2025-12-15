@@ -1,8 +1,9 @@
-import os, time
+import time
 from motor.motor_asyncio import AsyncIOMotorClient
+from config import MONGO_URI, DB_NAME
 
-mongo = AsyncIOMotorClient(os.getenv("MONGO_URI"))
-db = mongo[os.getenv("DB_NAME", "nexa_nsfw")]
+mongo = AsyncIOMotorClient(MONGO_URI)
+db = mongo[DB_NAME]
 
 settings = db.settings
 cache = db.cache
@@ -20,8 +21,8 @@ async def set_nsfw_status(chat_id: int, state: bool):
     )
 
 async def get_nsfw_status(chat_id: int) -> bool:
-    data = await settings.find_one({"chat_id": chat_id})
-    return data["enabled"] if data else False
+    d = await settings.find_one({"chat_id": chat_id})
+    return d["enabled"] if d else False
 
 async def get_cached_scan(file_id: str):
     return await cache.find_one({"file_id": file_id})
