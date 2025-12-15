@@ -2,16 +2,24 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 
 from Nexa.database.client import get_global_stats
+from Nexa.utils.decorators import admin_only
 
+
+# ───────────────── STATS COMMAND ─────────────────
 
 @Client.on_message(filters.command("stats"))
-async def nexa_stats(_, message: Message):
-    stats = await get_global_stats()
+@admin_only
+async def stats_handler(client: Client, message: Message):
+    """
+    Shows global bot statistics
+    """
+
+    users, chats = await get_global_stats()
 
     text = (
-        "📊 **Nexa Stats**\n\n"
-        f"👥 **Total Users :** `{stats['users']}`\n"
-        f"💬 **Chats :** `{stats['chats']}`\n\n"
+        "📊 **Nexa NSFW Bot Stats**\n\n"
+        f"👤 **Total Users:** `{users}`\n"
+        f"👥 **Total Chats:** `{chats}`\n\n"
         "⚡ Powered by **@NexaCoders**"
     )
 
