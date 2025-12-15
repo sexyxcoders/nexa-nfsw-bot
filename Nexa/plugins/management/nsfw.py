@@ -21,9 +21,9 @@ from Nexa.core.session import get_session
 # ───────────────── IMAGE OPTIMIZATION ─────────────────
 
 def optimize_image(data: bytes) -> bytes:
-    if len(data) < 40 * 1024:
-        return data
     try:
+        if len(data) < 40 * 1024:
+            return data
         img = Image.open(io.BytesIO(data)).convert("RGB")
         img.thumbnail((256, 256))
         out = io.BytesIO()
@@ -48,9 +48,9 @@ def score_ui(scores: dict) -> str:
 # ───────────────── DETECTION ─────────────────
 
 def is_nsfw(scores: dict):
-    for k in ("porn", "hentai", "sexy"):
-        if scores.get(k, 0.0) >= NSFW_THRESHOLD:
-            return True, f"{k.capitalize()} Content ({scores[k]*100:.2f}%)"
+    for key in ("porn", "hentai", "sexy"):
+        if scores.get(key, 0.0) >= NSFW_THRESHOLD:
+            return True, f"{key.capitalize()} Content ({scores[key]*100:.2f}%)"
     return False, "Safe"
 
 
@@ -58,7 +58,7 @@ def is_nsfw(scores: dict):
 
 @Client.on_message(filters.command("nsfw") & filters.group)
 @admin_only
-async def nsfw_toggle(_, m: Message):
+async def nsfw_toggle(client: Client, m: Message):
     if len(m.command) < 2:
         state = await get_nsfw_status(m.chat.id)
         return await m.reply(
@@ -84,11 +84,11 @@ async def nsfw_toggle(_, m: Message):
 )
 async def nsfw_watcher(client: Client, m: Message):
 
-    # Check enabled
+    # NSFW disabled
     if not await get_nsfw_status(m.chat.id):
         return
 
-    # Ignore animated stickers
+    # Ignore animated/video stickers
     if m.sticker and (m.sticker.is_animated or m.sticker.is_video):
         return
 
@@ -98,10 +98,10 @@ async def nsfw_watcher(client: Client, m: Message):
 
     file_id = media.file_unique_id
 
-    # ── Redis fast cache
-    r = redis_get(file_id)
-    if r is not None:
-        if r.get("bad"):
+    # ── Redis cache
+    cached = redis_get(file_id)
+    if cached is not None:
+        if cached.get("bad"):
             await m.delete()
         return
 
