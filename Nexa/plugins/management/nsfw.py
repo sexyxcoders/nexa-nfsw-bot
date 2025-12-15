@@ -71,7 +71,7 @@ async def nsfw_toggle(_, m: Message):
 # ---------- WATCHER ----------
 
 @Client.on_message(
-    filters.group & (filters.photo | filters.sticker | (filters.document & filters.image)),
+    filters.group & (filters.photo | filters.sticker | filters.document),
     group=3
 )
 async def nsfw_watch(client: Client, m: Message):
@@ -79,20 +79,27 @@ async def nsfw_watch(client: Client, m: Message):
         return
 
     media = m.photo or m.sticker or m.document
+
+    # ❗ Only allow image documents
+    if m.document:
+        if not m.document.mime_type:
+            return
+        if not m.document.mime_type.startswith("image/"):
+            return
+
     fid = media.file_unique_id
 
-    # ---------- Redis FAST PATH ----------
-    cached_redis = redis_get(fid)
-    if cached_redis:
-        data = json.loads(cached_redis)
-        if data["bad"]:
+    # ---------- REDIS ----------
+    cached = redis_get(fid)
+    if cached:
+        if cached == "1":
             await m.delete()
         return
 
-    # ---------- Mongo SAFE ----------
-    cached_mongo = get_cached_scan(fid)
-    if cached_mongo and cached_mongo.get("safe") is True:
-        redis_set(fid, json.dumps({"bad": False}))
+    # ---------- MONGO ----------
+    mongo_cache = get_cached_scan(fid)
+    if mongo_cache and mongo_cache.get("safe") is True:
+        redis_set(fid, "0")
         return
 
     # ---------- DOWNLOAD ----------
@@ -118,7 +125,7 @@ async def nsfw_watch(client: Client, m: Message):
     scores = data.get("scores", {})
     bad, reason = detect(scores)
 
-    redis_set(fid, json.dumps({"bad": bad}))
+    redis_set(fid, "1" if bad else "0")
     cache_scan_result(fid, not bad, data)
 
     if not bad:
