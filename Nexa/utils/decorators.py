@@ -8,23 +8,23 @@ def admin_only(func):
     async def wrapper(client, message: Message, *args, **kwargs):
 
         if message.chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
-            return await message.reply("❌ Group only command")
+            return await message.reply_text("❌ Group only command")
 
         if not message.from_user:
-            return await message.reply("❌ Anonymous admins not supported")
+            return await message.reply_text("❌ Anonymous admins not supported")
 
         bot = await client.get_chat_member(message.chat.id, "me")
         if bot.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-            return await message.reply("❌ I must be admin")
+            return await message.reply_text("❌ I must be admin")
 
         user = await client.get_chat_member(message.chat.id, message.from_user.id)
         if user.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-            return await message.reply("❌ Admins only")
+            return await message.reply_text("❌ Admins only")
 
         return await func(client, message, *args, **kwargs)
 
     return wrapper
 
 
-# BACKWARD COMPATIBILITY
+# backward compatibility
 AdminRights = admin_only
