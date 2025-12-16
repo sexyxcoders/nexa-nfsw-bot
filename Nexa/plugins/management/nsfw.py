@@ -18,7 +18,7 @@ from Nexa.database.client import (
 
 logger = logging.getLogger(__name__)
 
-NSFW_API_URL = "https://nexacoders-nexa-api.hf.space/scan"
+NSFW_API_URL = "https://nexacoders-nexa-api.hf.space/batch-scan"
 
 # =====================================================
 # GLOBAL SESSION
